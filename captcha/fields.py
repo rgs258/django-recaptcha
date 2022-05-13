@@ -11,7 +11,7 @@ from captcha import client
 from captcha.constants import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
 from captcha.exceptions import (
     CaptchaScoreError, CaptchaValidationError,
-    CaptchaHTTPError,
+    CaptchaHTTPError, CaptchaHostnameError,
 )
 from captcha.widgets import ReCaptchaBase, ReCaptchaV2Checkbox
 
@@ -26,7 +26,7 @@ class ReCaptchaField(forms.CharField):
     }
 
     def __init__(self, public_key=None, private_key=None, log_level_validate=None,
-                 log_level_score=None, *args, **kwargs):
+                 log_level_score=None, log_level_hostname=None, *args, **kwargs):
         """
         ReCaptchaField can accepts attributes which is a dictionary of
         attributes to be passed to the ReCaptcha widget class. The widget will
@@ -53,6 +53,8 @@ class ReCaptchaField(forms.CharField):
             settings, "RECAPTCHA_PUBLIC_KEY", TEST_PUBLIC_KEY
         )
 
+        self.log_level_hostname = log_level_hostname or getattr(
+            settings, "RECAPTCHA_LOG_LEVEL_HOSTNAME", logging.ERROR)
         self.log_level_validate = log_level_validate or getattr(
             settings, "RECAPTCHA_LOG_LEVEL_VALIDATE", logging.ERROR)
         self.log_level_score = log_level_score or getattr(
@@ -95,6 +97,20 @@ class ReCaptchaField(forms.CharField):
             raise CaptchaValidationError(
                 self.error_messages["captcha_invalid"], code="captcha_invalid"
             )
+
+        validate_hostname = self.widget.attrs.get("validate_hostname")
+        if validate_hostname:
+            hostname = check_captcha.extra_data.get("hostname")
+            if not validate_hostname(hostname):
+                logger.log(
+                    self.log_level_hostname,
+                    "ReCAPTCHA validation failed because hostname %s rejected" %
+                    hostname
+                )
+                raise CaptchaHostnameError(
+                    self.error_messages["captcha_invalid"],
+                    code="captcha_invalid"
+                )
 
         required_score = self.widget.attrs.get("required_score")
         if required_score:

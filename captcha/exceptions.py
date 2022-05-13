@@ -7,6 +7,10 @@ class CaptchaHTTPError(ValidationError):
 
 class CaptchaValidationError(ValidationError):
     pass
+	
+	
+class CaptchaHostnameError(ValidationError):
+    pass
 
 
 class CaptchaScoreError(ValidationError):
