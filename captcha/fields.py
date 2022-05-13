@@ -9,6 +9,10 @@ from django.utils.translation import gettext_lazy as _
 
 from captcha import client
 from captcha.constants import TEST_PRIVATE_KEY, TEST_PUBLIC_KEY
+from captcha.exceptions import (
+    CaptchaScoreError, CaptchaValidationError,
+    CaptchaHTTPError,
+)
 from captcha.widgets import ReCaptchaBase, ReCaptchaV2Checkbox
 
 logger = logging.getLogger(__name__)
@@ -21,7 +25,8 @@ class ReCaptchaField(forms.CharField):
         "captcha_error": _("Error verifying reCAPTCHA, please try again."),
     }
 
-    def __init__(self, public_key=None, private_key=None, *args, **kwargs):
+    def __init__(self, public_key=None, private_key=None, log_level_validate=None,
+                 log_level_score=None, *args, **kwargs):
         """
         ReCaptchaField can accepts attributes which is a dictionary of
         attributes to be passed to the ReCaptcha widget class. The widget will
@@ -48,6 +53,11 @@ class ReCaptchaField(forms.CharField):
             settings, "RECAPTCHA_PUBLIC_KEY", TEST_PUBLIC_KEY
         )
 
+        self.log_level_validate = log_level_validate or getattr(
+            settings, "RECAPTCHA_LOG_LEVEL_VALIDATE", logging.ERROR)
+        self.log_level_score = log_level_score or getattr(
+            settings, "RECAPTCHA_LOG_LEVEL_SCORE", logging.ERROR)
+
         # Update widget attrs with data-sitekey.
         self.widget.attrs["data-sitekey"] = self.public_key
 
@@ -72,16 +82,17 @@ class ReCaptchaField(forms.CharField):
                 remoteip=self.get_remote_ip(),
             )
 
-        except HTTPError:  # Catch timeouts, etc
-            raise ValidationError(
+        except HTTPError as e:  # Catch timeouts, etc
+            raise CaptchaHTTPError(
                 self.error_messages["captcha_error"], code="captcha_error"
-            )
+            ) from e
 
         if not check_captcha.is_valid:
-            logger.warning(
+            logger.log(
+                self.log_level_validate,
                 "ReCAPTCHA validation failed due to: %s" % check_captcha.error_codes
             )
-            raise ValidationError(
+            raise CaptchaValidationError(
                 self.error_messages["captcha_invalid"], code="captcha_invalid"
             )
 
@@ -101,10 +112,11 @@ class ReCaptchaField(forms.CharField):
             score = float(check_captcha.extra_data.get("score", 0))
 
             if required_score > score:
-                logger.warning(
+                logger.log(
+                    self.log_level_score,
                     "ReCAPTCHA validation failed due to its score of %s"
                     " being lower than the required amount." % score
                 )
-                raise ValidationError(
+                raise CaptchaScoreError(
                     self.error_messages["captcha_invalid"], code="captcha_invalid"
                 )
